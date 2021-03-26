@@ -39,10 +39,10 @@ const bool lighthouseV2Filtering = false;
 
 static NimBLEAddress lighthouseV2MACs[] = {};
 
-// Connect an LED to this pin to get info on if there was an issue during the command (if an error does happen, just try it again a couple times)
-// Just a couple slow-ish blinks: Success
-// Many fast blinks: Error, try again
-const uint8_t ledPin = 25; 
+// Connect an LED to this pin to get info on if there was an issue during the
+// command (if an error does happen, just try it again a couple times) Just a
+// couple slow-ish blinks: Success Many fast blinks: Error, try again
+const uint8_t ledPin = 25;
 
 Button offButton(32);  // define the pin for button (pull to ground to activate)
 
@@ -229,14 +229,43 @@ void scanEndedCB(NimBLEScanResults results) {
  * clients */
 static ClientCallbacks clientCB;
 
+bool connectToLighthouse(NimBLEClient* pClient,
+                         NimBLEAdvertisedDevice* advDevice) {
+  bool connected = false;
+  // Let's give it a few tries just in case, I've had it fail once but work
+  // again right after.
+  for (uint8_t i = 0; i < 3; i++) {
+    delay(1500);
+    Serial.print("Connection Attempt #");
+    Serial.print(i+1);
+    Serial.print(": ");
+    connected = pClient->connect(advDevice, false);
+    if (connected) {
+      Serial.println("Success");
+      break;
+    } else {
+      Serial.println("Fail");
+    }
+  }
+  if (connected) {
+    return true;
+  }
+  return false;
+}
+
 /** Handles the provisioning of clients and connects / interfaces with the
  * server */
-bool connectToServer() {
+bool sendLighthouseCommands() {
   NimBLEClient* pClient = nullptr;
 
   NimBLEAdvertisedDevice* advDevice = nullptr;
 
   bool fullSuccess = true;
+
+  if (!lighthouseCount) {
+    Serial.println("No lighthouses found to send commands to");
+    return false;
+  }
 
   for (uint8_t i = 0; i < lighthouseCount; i++) {
     // Serial.println(__LINE__);
@@ -250,11 +279,12 @@ bool connectToServer() {
        */
       pClient = NimBLEDevice::getClientByPeerAddress(advDevice->getAddress());
       if (pClient) {
-        if (!pClient->connect(advDevice, false)) {
+        if (connectToLighthouse(pClient, advDevice)) {
+          Serial.println("Reconnected!");
+        } else {
           Serial.println("Reconnect failed!");
           return false;
         }
-        Serial.println("Reconnected client");
       }
       /** We don't already have a client that knows this device,
        *  we will check for a client that is disconnected that we can use.
@@ -288,7 +318,7 @@ bool connectToServer() {
        * (seconds), default is 30. */
       pClient->setConnectTimeout(10);
 
-      if (!pClient->connect(advDevice)) {
+      if (!connectToLighthouse(pClient, advDevice)) {
         /** Created a client but failed to connect, don't need to keep it as it
          * has no data */
         NimBLEDevice::deleteClient(pClient);
@@ -298,7 +328,7 @@ bool connectToServer() {
     }
 
     if (!pClient->isConnected()) {
-      if (!pClient->connect(advDevice)) {
+      if (!connectToLighthouse(pClient, advDevice)) {
         Serial.println("Failed to connect");
         return false;
       }
@@ -337,9 +367,15 @@ bool connectToServer() {
               array[5] = strtoul(buffer, NULL, 16);
               strcpy(buffer, fullID.substr(6, 2).c_str());
               array[4] = strtoul(buffer, NULL, 16);
+              Serial.println(" - Turning Off");
             } else if (currentCommand == TURN_ON_PERM) {
               array[1] = 0x00;
               array[3] = 0x00;
+              array[7] = 0xFF;
+              array[6] = 0xFF;
+              array[5] = 0xFF;
+              array[4] = 0xFF;
+              /*
               std::string fullID = std::string(lighthouseHTCIDs[i]);
               char buffer[5];
               strcpy(buffer, fullID.substr(0, 2).c_str());
@@ -350,6 +386,8 @@ bool connectToServer() {
               array[5] = strtoul(buffer, NULL, 16);
               strcpy(buffer, fullID.substr(6, 2).c_str());
               array[4] = strtoul(buffer, NULL, 16);
+              */
+              Serial.println(" - Turning On");
             }
             if (pChr->writeValue(array, 20)) {
               Serial.println(" - Wrote command successfully");
@@ -373,12 +411,14 @@ bool connectToServer() {
         if (pChr) { /** make sure it's not null */
           if (pChr->canWrite()) {
             if (currentCommand == TURN_OFF) {
+              Serial.println(" - Turning Off");
               if (pChr->writeValue(0)) {
                 Serial.println(" - Wrote command successfully");
               } else {
                 fullSuccess = false;
               }
             } else if (currentCommand == TURN_ON_PERM) {
+              Serial.println(" - Turning On");
               if (pChr->writeValue(1)) {
                 Serial.println(" - Wrote command successfully");
               } else {
@@ -417,7 +457,7 @@ void setup() {
   NimBLEDevice::init("");
 
   /** Optional: set the transmit power, default is 3db */
-  // NimBLEDevice::setPower(ESP_PWR_LVL_P9); /** +9db */
+  NimBLEDevice::setPower(ESP_PWR_LVL_P9); /** +9db */
 
   /** create new scan */
   NimBLEScan* pScan = NimBLEDevice::getScan();
@@ -468,10 +508,9 @@ void loop() {
 
   if (currentCommand != NOTHING && readyToConnect) {
     Serial.println(__LINE__);
-    if (connectToServer()) {
+    if (sendLighthouseCommands()) {
       Serial.println("We should have sent the commands");
-      for (uint8_t i = 0; i < 3; i++)
-      {
+      for (uint8_t i = 0; i < 3; i++) {
         digitalWrite(ledPin, !digitalRead(ledPin));
         delay(200);
       }
@@ -480,8 +519,7 @@ void loop() {
           "We have failed to connect to a server that should have been there; "
           "there is nothing more we "
           "will do this time.");
-      for (uint8_t i = 0; i < 15; i++)
-      {
+      for (uint8_t i = 0; i < 15; i++) {
         digitalWrite(ledPin, !digitalRead(ledPin));
         delay(100);
       }
