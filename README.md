@@ -6,6 +6,8 @@ Control SteamVR Lighthouses/Base Stations with an ESP32 via BLE!
 
 ### Should be compatible with both V1 (HTC) and V2.0 SteamVR Base Stations/Lighthouses!
 
+### [Video Demo](https://streamable.com/vgiq07)
+
 Required Libraries:
 
 [JC_Button](https://github.com/JChristensen/JC_Button) (wrote with v2.1.2, quick button debouncing and state machining)
